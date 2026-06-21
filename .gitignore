@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Run artifacts (configs are committed; outputs are not)
+outputs/
+runs/
+*.log
+
+# Data governance: NEVER commit raw lab/platform data (size, licensing,
+# possible confidentiality). data/ holds loaders + schema only.
+data_raw/
+*.parquet
+*.feather
+!structuralrl/tests/**/*.parquet
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

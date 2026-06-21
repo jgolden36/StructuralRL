@@ -1,0 +1,29 @@
+# Phase 1 `sim` recovery run config (one config per run; records the determinism knobs).
+# See structuralrl/pipelines/_config.py::RunConfig for all fields and defaults.
+
+seed: 0
+corpus: sim
+
+# --- structural / identification knobs ---
+beta: 0.9                  # discount factor: CALIBRATED, never silently estimated (CLAUDE.md §7).
+                           # Report payoff sensitivity to beta separately (identified_set.beta_sensitivity).
+lam: null                 # pooling strength lambda; null => select by cross-validation across campaigns.
+lambdas: [0.0, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+normalization: center_within_state   # persisted shaping-class representative (Stage 3 is invariant to it).
+
+# --- known-truth synthetic game (sim track only) ---
+n_states: 6
+n_moves: 4
+n_features: 3
+n_roles: 3
+n_campaigns: 160
+horizon: 14
+delta_scale: 0.25         # role heterogeneity; partial pooling shrinks small deltas toward theta_0.
+
+# --- pre-registered merit-test tolerances (named in advance; do not retune on a passing run) ---
+tolerances:
+  role_move_freq: 0.10
+  move_transition: 0.12
+  role_transition: 0.12
+sufficiency_alpha: 0.05
+transfer_tol: 0.05
