@@ -1,0 +1,372 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{mathtools}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{microtype}
+\usepackage[authoryear,round]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\theoremstyle{definition}
+\newtheorem{assumption}{Assumption}
+
+\title{Structural Estimation of Dynamic Games as a\\ Pre-Reinforcement-Learning Initialization for Coordinated Agentic AI}
+\author{Dana Golden\\[2pt] \small Argonne National Laboratory}
+\date{Working draft, \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent We propose recovering the latent primitives of multi-actor human coordination, the per-actor payoffs and beliefs, with a structural dynamic-game estimator, and using the recovered equilibrium to initialize a collective of AI agents before any reinforcement learning. The identifying leverage is the equilibrium restriction familiar from empirical industrial organization: observed coordination is treated as equilibrium play, so the requirement that no actor has a profitable deviation pins down the payoffs that rationalize it. We make explicit the correspondence between dynamic discrete choice estimation and inverse reinforcement learning, set up a collaborative-production game with a partially pooled payoff specification, and stage a training pipeline in which a two-step estimator recovers role payoffs and beliefs, the recovered equilibrium initializes the agent collective, and reinforcement learning then searches for a better equilibrium from a coordinated, data-grounded starting point. Along the way we make explicit the correspondence between payoff normalization in dynamic discrete choice and policy-invariant reward shaping in reinforcement learning, and we characterize which stages of the pipeline are invariant to the normalization and which are not. We work through coordinated contingency response in power-system operations as a case in which the human equilibrium is presumptively good, externally benchmarked, and currently hard for independent agents to reach, and we argue the recovered equilibrium is a natural baseline for agentic orchestration.
+\end{abstract}
+
+\section{The core idea}
+
+The standard recipes for training multi-agent systems to coordinate are behavioral cloning (mimic recorded human action) and reinforcement learning against a hand-built or preference-learned reward (RLHF and its multi-agent cousins). Both have a known weak point. Behavioral cloning reproduces a policy but recovers no objective, so it cannot be improved and it compounds errors once it drifts off the human distribution \citep{rossGordonBagnell2011}. Reinforcement learning can improve, but only once someone has supplied a reward that actually induces coordination, and for long-horizon, sparse-signal, or multi-actor tasks that reward is the hard part. Even where a dense score exists, getting reinforcement learning to work has historically required substantial engineering around the reward channel: the Atari results, for instance, leaned on reward clipping to a small range together with frame stacking, target networks, and experience replay \citep{mnih2015}. The deeper lesson is not that score-based games are hard but that specifying the objective and the coordination signal is the binding constraint, and it gets worse, not better, when several heterogeneous actors must move at once.
+
+The proposal here is to replace the front of that pipeline. Where data exist on several humans interacting to produce a joint artifact, use a structural dynamic-game estimator to recover the latent primitives that generated the observed coordination: each actor's flow payoff, their beliefs about the others, and the law that maps joint action into a new state. The identifying leverage comes from the equilibrium restriction. Observed behavior is treated as equilibrium play, so the requirement that no actor has a profitable deviation pins down (or partially pins down) the payoffs that rationalize what we see. We then instantiate agents that carry the recovered payoffs and best-respond to the recovered beliefs. By the fixed-point logic of equilibrium, a collective in which each agent best-responds to the empirical play of the others reproduces the human interaction pattern by construction. Only after that do we run reinforcement learning, now searching locally for a \emph{better} equilibrium from a starting point that is already coordinated and already equipped with a data-grounded objective.
+
+A useful one-line positioning: this is the supervised-then-self-play pipeline of \citet{silver2016}, with the supervised step replaced by a structural multi-agent estimation step. AlphaGo first learned a policy that predicted human moves, then improved it by reinforcement learning. Here we go further than predicting moves: we recover the payoffs and beliefs behind a multi-actor equilibrium, which gives the subsequent reinforcement learning both a coordinated initialization and a reward it does not have to invent.
+
+\section{Why the equilibrium restriction recovers what cloning and RLHF do not}
+
+\subsection{The single-agent correspondence}
+
+Start with one forward-looking actor choosing among discrete actions, in the dynamic discrete choice form of \citet{rust1987}. Let $s$ be the state, $a$ the action, $\theta$ the payoff parameters, and $\beta$ the discount factor, and let the choice-specific value be
+\begin{equation}
+v(s,a;\theta) \;=\; u(s,a;\theta) \;+\; \beta\, \mathbb{E}\big[V(s') \mid s,a\big],
+\qquad
+V(s) \;=\; \mathbb{E}_{\varepsilon}\,\max_{a}\,\{\,v(s,a;\theta) + \varepsilon_a\,\}.
+\end{equation}
+With i.i.d.\ Type-I extreme-value shocks $\varepsilon_a$, the choice probabilities take the logit form
+\begin{equation}
+P(a\mid s) \;=\; \frac{\exp\{v(s,a;\theta)\}}{\sum_{a'}\exp\{v(s,a';\theta)\}}.
+\label{eq:logit}
+\end{equation}
+Equation \eqref{eq:logit} is exactly the softmax-over-Q-values policy that maximum-entropy inverse reinforcement learning produces \citep{ziebart2008}, and the earlier inverse reinforcement learning formulations of \citet{ngRussell2000} and \citet{abbeelNg2004} recover a reward under the same near-optimality premise. The two literatures describe the same estimand from different doors. The econometrics side adds two tools that matter for us. First, the inversion of \citet{hotzMiller1993}: differences in the value function are recoverable from the log choice probabilities, so we can estimate without re-solving the dynamic program at every parameter guess. Second, identification analysis \citep{magnacThesmar2002} that tells us exactly what is and is not pinned down, including the weak identification of the discount factor and the normalization dependence of payoff levels, to which Section \ref{sec:norm} returns.
+
+\subsection{The multi-agent extension}
+
+Now let players $i = 1,\dots,N$ share a state $s$ and choose actions $a_i$, with policies (conditional choice probabilities) $\sigma_i(a_i\mid s)$. Given rivals' policies $\sigma_{-i}$, player $i$'s choice-specific value is
+\begin{equation}
+v_i(s,a_i;\theta_i)
+\;=\;
+\mathbb{E}_{a_{-i}\sim\sigma_{-i}}\!\Big[\,\pi_i(s,a_i,a_{-i};\theta_i)
+\;+\; \beta\,\mathbb{E}\big[V_i(s')\mid s,a\big]\Big].
+\end{equation}
+A Markov Perfect Equilibrium is a profile in which each $\sigma_i$ is a best response to $\sigma_{-i}$, that is, a fixed point $\sigma = \Psi(\sigma)$ of the joint best-response map $\Psi$. Replacing exact maximization with logit (quantal) best response gives the smoothed equilibrium of \citet{mckelveyPalfrey1995}, in which every policy is a softmax over choice-specific values. This smoothed object is the right one for our purposes for two independent reasons: it is more behaviorally realistic for human teams that do not play exactly, and it maps cleanly onto a stochastic language policy, where the sampling temperature plays the role of the logit scale.
+
+This is where the estimators earn their place. Computing an equilibrium directly is expensive and the equilibrium may not be unique \citep{pakesMcGuire1994, pakesMcGuire2001}. The two-step estimators avoid that. \citet{bbl2007}, hereafter BBL, estimate the policies and the transition law nonparametrically in a first step, then in a second step find payoffs that make the \emph{observed} policies optimal against the \emph{observed} rival behavior, using forward simulation rather than equilibrium computation. The related approaches of \citet{aguirregabiriaMira2007}, \citet{pesendorferSchmidtDengler2008}, and \citet{pakesOstrovskyBerry2007} share the structure. The property we want is precisely the one that makes BBL convenient: it conditions on whatever equilibrium generated the data. We do not have to solve the game and we do not have to take a stand on equilibrium selection at estimation time. We recover the payoffs that rationalize the human coordination we actually observed.
+
+The contrast with the two baselines is now sharp. Behavioral cloning gives $\hat\sigma_i$ and stops; there is no $\theta_i$ to optimize and nothing to improve. RLHF supplies a reward model from preference comparisons and still needs shaping to induce coordination. The structural step recovers an interpretable, role-specific payoff $\theta_i$ from revealed behavior under an equilibrium restriction, and that payoff is exactly the object the later reinforcement-learning stage should optimize. The closest machine-learning analog, the multi-agent adversarial inverse reinforcement learning of \citet{yuSongErmon2019}, recovers rewards in Markov games under a logistic equilibrium notion; the industrial-organization machinery brings to that program a disciplined treatment of partial identification, estimators that never solve the game, and established tools for unobserved heterogeneity \citep{arcidiaconoMiller2011}.
+
+\subsection{Normalization, reward shaping, and what survives improvement}
+\label{sec:norm}
+
+The single-agent identification results carry a warning that this proposal must confront head-on. With the discount factor and the shock distribution known, flow payoffs in a dynamic discrete choice model are identified only up to a normalization, conventionally the payoff of a reference action set to zero in every state \citep{magnacThesmar2002, noretsTang2014}. The normalization is harmless for fitting observed behavior. It is not harmless for counterfactuals: \citet{kss2021} and \citet{aguirregabiriaSuzuki2014} show that counterfactual choice probabilities generally depend on which normalization was imposed, and they characterize the special classes of counterfactuals that are invariant.
+
+Reinforcement learning has the mirror-image result. \citet{ngHaradaRussell1999} show that potential-based reward shaping, replacing $r(s,a,s')$ with $r(s,a,s') + \beta\Phi(s') - \Phi(s)$ for an arbitrary potential $\Phi$, preserves the set of optimal policies, and the reward-identifiability literature shows that demonstrations pin down the reward only up to (at least) this class of transformations \citep{kim2021, cao2021, skalse2023}. The correspondence is exact in the relevant sense. The object the \citet{hotzMiller1993} inversion recovers from choice probabilities, differences in choice-specific values, is precisely the shaping-invariant object, and the dynamic discrete choice normalization is one way of selecting a representative from the equivalence class. The two literatures found the same partial identification from opposite doors.
+
+This matters here because Stage 4 of the pipeline is a counterfactual exercise: reinforcement learning evaluates policies away from the observed path under the recovered reward. The stages are not equally exposed. Stage 3 is fully invariant, since reproducing the estimated equilibrium policies requires no payoff levels at all. Stage 4 run role by role, each agent improving against frozen rivals, is a single-agent problem in which potential-based transformations preserve the optimal policy, so the improvement direction is well-posed across the equivalence class. Stage 4 with all roles moving jointly is not protected: as $\sigma_{-i}$ changes, each role faces a different induced decision problem, and members of the on-path equivalence class disagree precisely off the equilibrium path. Claims about jointly improved equilibria are therefore normalization-dependent unless they are disciplined.
+
+Three disciplines are available, in increasing strength. First, sensitivity: rerun Stage 4 under several admissible normalizations and report the spread. Second, invariance: state improvement claims in normalization-invariant terms, for example externally measured outcomes of the improved collective, rather than in units of the recovered reward. Third, anchoring: bring in payoff-level information that shrinks the equivalence class, through exclusion restrictions or directly measured payoff components. The worked example below is favorable on the third count, because redispatch costs, reserve prices, and value-of-lost-load figures are dollar-denominated and observed, so parts of the payoff carry measurable levels rather than free normalizations.
+
+\section{Setting up the collaborative-production game}
+
+To make any of this concrete we map a collaborative task onto its players, states, actions, payoffs, beliefs, and transitions.
+
+\subsection{Primitives}
+
+\textbf{Players} are distinct roles rather than distinct named people, since roles are what we want to generalize across teams. \textbf{State} $s_t$ is the current artifact-in-progress together with the relevant history. \textbf{Actions} $a_{i,t}$ are contributions. \textbf{Payoffs} $\pi_i(s,a_i,a_{-i};\theta_i)$ are role-specific flow rewards. \textbf{Beliefs} are each agent's beliefs about the others, taken in equilibrium to be the estimated conditional choice probabilities $\hat\sigma_{-i}$. \textbf{Transition} $F(s'\mid s,a)$ governs how the artifact evolves under the joint action. The \textbf{discount factor} $\beta$ captures forward-looking behavior and, as in the empirical literature, is calibrated rather than estimated, with sensitivity analysis.
+
+\subsection{State representation and discrete moves}
+
+The state is high-dimensional and partly latent, which is the single biggest gap between this idea and a textbook application. The practical move is to learn a state encoder $\phi$ that maps the artifact and history into a vector intended to be a sufficient statistic for continuation behavior. Modern representation learning supplies $\phi$; the validity of the whole structural argument then rests on the following maintained assumption.
+
+\begin{assumption}[State sufficiency]
+\label{ass:state}
+The encoded state $\phi(s)$ is a sufficient statistic for continuation play, so that future moves are conditionally independent of dropped history given $\phi(s)$.
+\end{assumption}
+
+The realized action is a span of text and so lives in a combinatorial space, while structural estimators assume a small discrete action set. The bridge is to define actions at the level of strategic \emph{moves} (``propose'', ``revise'', ``critique'', ``accept'', ``defer'', ``escalate'') and to treat the realized text as a within-move structured choice. This is the same reduction empirical industrial organization already performs when it collapses rich firm conduct into discrete enter, exit, or invest decisions. The move taxonomy can be specified from domain knowledge or induced by clustering observed contributions, then validated against held-out behavior.
+
+\subsection{Quantal response and the temperature correspondence}
+
+We take observed play to be a smoothed (quantal-response) equilibrium, which both fits the noisy behavior of real teams and aligns with the stochastic policy of a temperature-parameterized language model.
+
+\begin{assumption}[Equilibrium play]
+\label{ass:eq}
+Observed behavior is a quantal-response equilibrium of the dynamic game: each role's policy is a (logit) best response to the others, and no role has a payoff-improving deviation given rivals' play.
+\end{assumption}
+
+One caution attaches to the temperature correspondence. Payoff scale and logit scale are not separately identified, so the shock scale is normalized to one and the recovered payoffs are denominated in units of the shock. The sampling temperature of the language policy inherits this normalization, which means temperature comparisons across domains are statements about relative payoff scale, not about an absolute degree of noise.
+
+\subsection{A partially pooled payoff specification}
+
+Per-role data are typically thin, so we pool the payoffs partially. Write
+\begin{equation}
+\theta_i \;=\; \theta_0 \;+\; \delta_i,
+\qquad
+\delta_i \sim \mathcal{N}(0,\Sigma_\delta),
+\label{eq:pool}
+\end{equation}
+where $\theta_0$ is a component common to all roles and $\delta_i$ is a role-specific deviation shrunk toward zero. With a payoff that is linear in parameters through features $x(s,a_i,a_{-i})$, this reads $\pi_i = x^\top\theta_i = x^\top\theta_0 + x^\top\delta_i$, so $\theta_0$ is the shared valuation of features and $\delta_i$ is the role's idiosyncratic re-weighting.
+
+\begin{assumption}[Hierarchical pooling]
+\label{ass:pool}
+Role-specific deviations are drawn from a common distribution as in \eqref{eq:pool}, with $\Sigma_\delta$ either fixed or estimated jointly.
+\end{assumption}
+
+The identification content is as follows. The common component $\theta_0$ is identified from variation pooled across all roles and teams and is the best-identified object. The role-specific deviations $\delta_i$ are identified from within-role variation in states and from the differential responses of roles to the same state; they are shrunk toward zero, so a role receives a distinct payoff only to the extent the data demand it. The hierarchical structure borrows strength across roles, which both addresses thin per-role data and tightens the effective identified set, at the cost of an explicit prior that must be stated and defended (Assumption \ref{ass:pool}). Substantively, partial pooling is attractive whenever a shared objective is exactly the thing we want to replicate and role specialization is a smaller departure from it, which is the situation in the worked example below.
+
+The pooled limit also has a game-theoretic reading worth making explicit. As $\lambda \to \infty$ every role carries the same payoff $\theta_0$ and the game collapses to a Markov team problem in the sense of \citet{marschakRadner1972}: identical interests with dispersed actions and information. Common-interest games are the best case for both equilibrium selection and multi-agent learning, so $\lambda$ does more than shrink estimates. It interpolates between a team problem and a genuinely strategic game, the estimated deviations $\hat\delta_i$ measure how much strategic tension the data demand, and the convergence behavior of the later reinforcement-learning stage should be expected to degrade smoothly as that tension grows.
+
+\section{Worked example: coordinated contingency response in power-system operations}
+
+Consider the short-horizon response to a credible contingency in a bulk power system, in which a small set of operators in defined functional roles must jointly return the system to a secure state without initiating a cascade. This is the kind of case the design is built for: the human equilibrium is presumptively good, it is externally benchmarked, and it is currently hard for independent agents to reach.
+
+\paragraph{Why the equilibrium is good and worth replicating.}
+A competently run restoration is benchmarked against reliability standards and reviewed after the fact, so there is an external, non-circular notion of a good outcome: the system stays within limits, no cascade is triggered, and service is restored quickly and securely. The value of the equilibrium is largely the avoided cascade. That value is what makes the target desirable to replicate and, at the same time, what makes it hard to learn from scratch: the good signal is sparse and lives in a catastrophic tail, so a from-scratch reinforcement learner would have to either experience catastrophes, which is unacceptable, or be handed a finely shaped reward, which is the hard problem the structural front end is meant to remove. Uncoordinated parallel actions can violate limits, double-commit reserves, or issue conflicting switching orders, which is precisely what coordination prevents.
+
+\paragraph{Mapping to the primitives.}
+We use a stylized set of functional roles rather than a literal regulatory taxonomy.
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt,topsep=2pt]
+  \item \emph{Players}: wide-area reliability coordination; transmission operation (topology, voltage, thermal limits); generation and balancing (real-power balance, reserves, ramping); and a market or redispatch interface (congestion management, redispatch cost).
+  \item \emph{State} $s_t$: post-contingency flows, voltages, frequency, reserve margins, and equipment status, together with outstanding directives and the action history, encoded by $\phi$. Assumption \ref{ass:state} is demanding here because much operator situational awareness is never logged, which is the central validity concern for this domain and the reason the proof of concept should begin where logging is richest.
+  \item \emph{Actions} (moves): issue a switching order, adjust dispatch or reserves, arm a remedial action scheme, request mutual assistance, reduce load in a controlled way as a last resort, hold and monitor, or escalate.
+  \item \emph{Payoffs}, partially pooled per \eqref{eq:pool}: the common component $\theta_0$ is the system-security and cascade-avoidance objective that every role internalizes, which is exactly what we most want to replicate; the role deviations $\delta_i$ are the specialized weights (voltage and thermal limits for transmission, reserve adequacy and ramp cost for balancing, congestion and redispatch cost for the market interface, wide-area margin for reliability coordination), together with effort and coordination or conflict costs. The substantive fit to partial pooling is tight: the shared good is pooled, the specialization is the deviation.
+  \item \emph{Transition} $F(s'\mid s,a)$: partly deterministic, since a switching action changes topology, and partly stochastic, since a marginal element may or may not trip and load and renewable output move. A validated power-system simulator can supply $\hat F$ and serve as the rollout environment, which is a real advantage of this domain, because Stage 4 reinforcement learning can be run in silico against $\hat F$ without catastrophic real-world exploration.
+\end{itemize}
+
+\paragraph{Episodic structure.}
+Contingency response is an episodic, finite-horizon task with an absorbing terminal condition: the system is restored to a secure state, or the event escalates beyond the modeled horizon. Operator behavior is also plausibly non-stationary in time since the event. The stationary infinite-horizon equilibrium of Section 2 should therefore be read as defined on episodes. The value function carries a terminal payoff at absorption, and either policies are indexed by event phase or time-in-event enters $\phi$ as a state variable. Making this explicit matters because otherwise Assumption \ref{ass:state} silently absorbs the non-stationarity, and a violated Markov property would surface only as quiet misestimation.
+
+\paragraph{Data and a favorable identification angle.}
+Candidate data include energy-management-system and SCADA event logs, dispatch and switching records, control-room action timelines, and post-event analyses. The strongest source is operator training-simulator sessions, which are richly instrumented, role-labeled, and state-conditioned, and in which competent (good) play is exactly what trainers certify. Simulator data therefore give the panel structure the estimator needs together with an externally validated notion of the good equilibrium we want to recover.
+
+\section{The training pipeline}
+
+The pipeline is staged so that each step has a clear estimand and a clear assumption. Stages 1 and 2 follow the two-step logic of \citet{hotzMiller1993} and BBL, with a quantal-response pseudo-likelihood as the primary second step, an inequality-based alternative as robustness, and partial pooling added to both; Stage 3 is the equilibrium-consistent initialization; Stage 4 is the improvement step. Define the value of role $i$ using policy $\sigma_i'$ against fixed rivals $\hat\sigma_{-i}$ as the simulated discounted payoff sum
+\begin{equation}
+V_i(\sigma_i',\hat\sigma_{-i};\theta_i)
+=
+\mathbb{E}\!\left[\sum_{t=0}^{\infty}\beta^{t}\,\pi_i\big(s_t,a_{i,t},a_{-i,t};\theta_i\big)
+\;\middle|\;
+a_{i,\cdot}\sim\sigma_i',\ a_{-i,\cdot}\sim\hat\sigma_{-i},\ s_{\cdot}\sim\hat F\right].
+\label{eq:value}
+\end{equation}
+Under Assumption \ref{ass:eq} the logit shocks are structural rather than approximation error: each role draws action-specific payoff shocks, and the observed policy is exactly optimal in the shock-inclusive payoff. Two consequences follow. First, the inversion of \citet{hotzMiller1993} applies directly, so differences in choice-specific values are read off the log choice probabilities, $v_i(s,a)-v_i(s,a') = \log\hat\sigma_i(a\mid s)-\log\hat\sigma_i(a'\mid s)$. Second, the natural second step is likelihood-based. Given $\hat\sigma_{-i}$ and $\hat F$ from Stage 1, compute choice-specific values $v_i(s,a;\theta_i)$ by forward simulation against the estimated rivals and transition law, let $\sigma_i(a\mid s;\theta_i)$ denote the implied logit policy, and estimate the partially pooled payoffs by penalized pseudo-likelihood,
+\begin{equation}
+\big(\widehat\theta_0,\{\widehat\delta_i\}\big)
+\;=\;
+\arg\max_{\theta_0,\,\{\delta_i\}}\
+\sum_{i}\sum_{t} \log \sigma_i\big(a_{i,t}\mid s_t;\,\theta_0+\delta_i\big)
+\;-\;
+\lambda \sum_i \delta_i^{\top}\Sigma_\delta^{-1}\delta_i,
+\label{eq:ppl}
+\end{equation}
+a hierarchical relative of the pseudo-likelihood estimators of \citet{aguirregabiriaMira2007}. The penalty is the contribution of the Gaussian prior in \eqref{eq:pool}; a fully Bayesian treatment estimates $\Sigma_\delta$ jointly. When $\pi_i$ is linear in parameters, $v_i$ is linear in $\theta_i$ through forward-simulated discounted feature sums, so \eqref{eq:ppl} is a penalized logit. As before, $\lambda\!\to\!\infty$ gives complete pooling ($\theta_i \equiv \theta_0$) and $\lambda\!\to\!0$ gives no pooling, and we select $\lambda$ by cross-validation across held-out teams, scoring on the fit to held-out interaction statistics rather than in-sample, so that the pooling level is disciplined out of sample rather than chosen to flatter the estimates.
+
+An inequality-based second step remains available and serves as a robustness check. Treating the observed policy as exactly optimal in the deterministic payoff, the BBL objective penalizes profitable deviations:
+\begin{equation}
+\widehat\theta = \arg\min_{\theta}\ \sum_{i}\int
+\Big(\max\big\{0,\ V_i(\sigma_i',\hat\sigma_{-i};\theta) - V_i(\hat\sigma_i,\hat\sigma_{-i};\theta)\big\}\Big)^{2} dH(\sigma_i',i),
+\label{eq:bbl}
+\end{equation}
+where $H$ samples players and perturbations of their policies, with the partially pooled version
+\begin{equation}
+\begin{aligned}
+\big(\widehat\theta_0,\{\widehat\delta_i\}\big)
+&= \arg\min_{\theta_0,\,\{\delta_i\}}\ \Big[\, Q_{\mathrm{BBL}}(\theta_0,\{\delta_i\}) \;+\; \lambda \sum_i \delta_i^{\top}\Sigma_\delta^{-1}\delta_i \,\Big], \\[2pt]
+Q_{\mathrm{BBL}}(\theta_0,\{\delta_i\}) &= \sum_{i}\int\Big(\max\big\{0,\ V_i(\sigma_i',\hat\sigma_{-i};\theta_0+\delta_i) - V_i(\hat\sigma_i,\hat\sigma_{-i};\theta_0+\delta_i)\big\}\Big)^{2} dH(\sigma_i',i).
+\end{aligned}
+\label{eq:pooled}
+\end{equation}
+One caveat must be stated plainly. Under quantal play the observed policy is \emph{not} exactly optimal in the deterministic payoff, so small profitable deviations from $\hat\sigma_i$ exist by construction and \eqref{eq:bbl} is misspecified at the true parameters, with bias growing in the effective temperature. We therefore read the inequality route as the deterministic-payoff approximation, attractive when the forward-simulated likelihood is high-variance or when the weaker stance of moment inequalities is preferred, and we report identified sets there rather than points.
+
+Algorithm \ref{alg:pipeline} states the procedure. There is no synthetic data and no fabricated output anywhere in it; the learned and estimated components are labeled, and each carries the assumption it leans on.
+
+\begin{algorithm}[t]
+\caption{Structural initialization then improvement for coordinated agents}
+\label{alg:pipeline}
+\begin{algorithmic}[1]
+\Require multi-team interaction panels $\{(s_t,a_{i,t})\}$ per role $i$, per team
+\Ensure trained coordinated collective $\{\pi_i\}$
+\Statex \textit{Stage 0. Data and representation}
+\State fit state encoder $\phi$ on fold A \Comment{maintained: Assumption \ref{ass:state} (state sufficiency)}
+\State fix discrete move taxonomy $\mathcal{M}$ (domain specification or clustering); validate on held-out moves
+\Statex \textit{Stage 1. First step: policies and transitions}
+\For{each role $i$}
+  \State estimate CCP $\hat\sigma_i(a\mid s)$ on fold B \Comment{role-conditioned policy: behavioral cloning, read structurally}
+\EndFor
+\State estimate transition model $\hat F(s'\mid s,a)$
+\Statex \textit{Stage 2. Second step: partially pooled payoffs}
+\State define $V_i(\cdot)$ and choice-specific values by forward rollout under $\hat F$, Eq.~\eqref{eq:value}
+\State maximize the penalized pseudo-likelihood, Eq.~\eqref{eq:ppl}, for $(\hat\theta_0,\{\hat\delta_i\})$ \Comment{$\lambda$ chosen by cross-validation across held-out teams}
+\State robustness: re-estimate by the inequality objective, Eq.~\eqref{eq:pooled}; report identified \emph{sets} where weakly identified
+\State fix a payoff normalization and record the shaping-equivalence class \Comment{Section \ref{sec:norm}}
+\Statex \textit{Stage 3. Equilibrium-consistent initialization}
+\For{each role $i$}
+  \State $\pi_i.\textsc{policy} \gets \hat\sigma_i$ \Comment{warm start at the recovered equilibrium}
+  \State $\pi_i.\textsc{reward} \gets \hat\theta_0 + \hat\delta_i$ \Comment{internalize the recovered objective}
+\EndFor
+\Statex \textit{Stage 4. Improvement with a KL anchor}
+\Repeat
+  \State roll out joint trajectories with $\{\pi_i\}$ under $\hat F$ or a validated simulator
+  \For{each role $i$}
+    \State update $\pi_i$ by multi-agent RL on reward $\hat\theta_0+\hat\delta_i$ (or a joint objective) minus $\lambda_{\mathrm{KL}}\,\mathrm{KL}(\pi_i \,\|\, \hat\sigma_i)$
+  \EndFor
+\Until{convergence or quality plateau}
+\end{algorithmic}
+\end{algorithm}
+
+A few notes on the stages. Stage 1 produces agents that imitate human roles, which is necessary but not sufficient, because we have the policy and not the primitives. Stage 2 recovers the interpretable, role-specific rewards (the ``beliefs and rewards'' the agents should carry), with the common security objective pooled and the specializations shrunk. At Stage 3, because every agent starts at its recovered policy and these are mutual best responses by construction of Stage 2, the collective sits at an estimate of the human equilibrium, which is the formal content of producing responses to one another that mimic human equilibrium play. At Stage 4 the choice of objective determines what ``better'' means: optimizing each agent's recovered reward yields more efficient versions of the human roles within the same preference structure, while optimizing a joint or principal objective can leave the human equilibrium for a better one. In either case the KL penalty to the Stage 3 policies, the multi-agent analog of the KL-to-reference term in RLHF except that the reference is structurally recovered, is the main defense against collapse into a degenerate, non-human coordination pattern. Stage 4 should also respect the normalization analysis of Section \ref{sec:norm}: improvement of one role against frozen rivals is invariant across the recovered equivalence class, joint movement of all roles is not, and the disciplines listed there (sensitivity across normalizations, invariant evaluation, measured payoff anchors) apply at exactly this stage.
+
+\section{The structural equilibrium as a baseline for agentic orchestration}
+
+The recovered equilibrium is a natural baseline policy for an agentic orchestrator. It defines the default coordinated behavior of the collective, so the orchestration layer's job becomes managing departures from that default: deciding which agent acts when, sequencing moves, and doing so under an orchestration-cost budget. Reinforcement learning then improves the baseline, while the KL anchor keeps the improved policy within the human-validated manifold. In a safety-critical domain such as power-system operations, that anchoring is not only a stability device but an auditability device, because departures from the recovered human equilibrium are measurable and can be bounded, which is exactly the property an operator or regulator would want before trusting an automated response. Framing the structural equilibrium as the orchestration baseline also makes the orchestration cost interpretable: it is the cost of moving the collective off the coordinated default, measured against a default that was estimated from competent human play rather than assumed.
+
+\section{What this buys you against the alternatives}
+
+Against behavioral cloning, the structural step adds a recovered objective, which makes improvement well-posed and yields interpretable primitives that can transfer across teams rather than a black-box policy that only reproduces and degrades off-distribution.
+
+Against RLHF and multi-agent reinforcement learning from scratch, it removes the two hardest inputs at once. The reward is identified from revealed behavior under an equilibrium restriction instead of being shaped by hand, and coordination is present at initialization instead of having to be discovered. The Atari-era engineering burden, and its much larger multi-actor version, is precisely what the structural front end is meant to absorb.
+
+Against generic multi-agent inverse reinforcement learning, it brings the empirical industrial-organization toolkit: estimators that condition on the data-generating equilibrium and never solve the game, an honest partial-identification stance, and machinery for unobserved heterogeneity across roles, here in the form of the partial-pooling specification.
+
+Two further connections situate the design. The KL anchor has an offline reinforcement learning reading: it is the structural cousin of the pessimism or conservatism principle \citep{kumar2020cql}, keeping the improved policy where the data can vouch for the recovered model. And when Stage 4 optimizes a principal's objective rather than the recovered role rewards, the setup becomes a structural counterpart of cooperative inverse reinforcement learning \citep{hadfieldMenell2016}, with the recovered human equilibrium supplying the prior over how the team plays.
+
+\section{Identification and validity}
+
+This section decides whether the idea is a method or a metaphor, so the caveats are deliberately concrete.
+
+\textbf{Equilibrium multiplicity and selection.} Dynamic games routinely admit multiple equilibria. The two-step estimator finesses this at estimation time by conditioning on the equilibrium in the data, but if different teams played different equilibria, naive pooling is invalid. Either model the heterogeneity (finite mixtures over equilibria, in the spirit of \citealp{arcidiaconoMiller2011}) or estimate within sufficiently homogeneous strata.
+
+\textbf{Partial identification.} Inequality-based estimation and equilibrium multiplicity often deliver a set rather than a point for $\theta$. This should be reported as an identified set with sensitivity analysis, not collapsed to a spurious point estimate. The set-valued answer is the honest one and it carries directly into Stage 3, where it defines a family of admissible initializations.
+
+\textbf{Payoff normalization.} On-path data identify payoffs only up to the shaping-equivalence class of Section \ref{sec:norm} \citep{magnacThesmar2002, kss2021, aguirregabiriaSuzuki2014}. The Stage 3 initialization is invariant to the choice of representative; Stage 4 joint improvement is not. Sensitivity across admissible normalizations, normalization-invariant evaluation, and measured payoff components, such as the dollar-denominated costs of the operations domain, are the available disciplines and should be reported.
+
+\textbf{Off-path beliefs are not identified from on-path data.} Observed interaction reveals behavior only along the equilibrium path, so the beliefs needed to evaluate genuinely off-path play are not pinned down. This matters specifically for Stage 4, where reinforcement learning pushes the agents off the human path. The KL anchor mitigates drift, but the underlying limitation is real: the recovered model is trustworthy near the human equilibrium and increasingly extrapolative away from it.
+
+\textbf{State-representation sufficiency.} The whole structural argument assumes Assumption \ref{ass:state}, the Markov property in the chosen state. A learned encoder that drops payoff-relevant history breaks identification quietly, because the estimator still returns numbers. This needs explicit testing, for example checking conditional independence of future moves from dropped history given $\phi(s)$, and treating sufficiency as a maintained assumption to be probed rather than asserted. The concern is sharpest in the operations example, where much situational awareness is unlogged.
+
+\textbf{Action discretization.} Collapsing text or operator conduct into strategic moves is a modeling choice that can be wrong. The taxonomy should be validated by its ability to predict held-out behavior, and results should be checked for sensitivity to the granularity of the move set.
+
+\textbf{The pooling prior.} Partial pooling helps with thin per-role data and tightens identified sets, but over-pooling can mask genuine role heterogeneity. This is why $\lambda$ in \eqref{eq:pooled} is selected out of sample rather than in sample, and why the prior of Assumption \ref{ass:pool} should be stated explicitly and its influence reported.
+
+\textbf{Discount factor.} Weakly identified, as in the single-agent literature. Calibrate $\beta$ and report how the recovered payoffs and the downstream behavior move with it.
+
+\section{Open problems and a near-term agenda}
+
+The honest list of what is unsolved, roughly in order of how much each gates a first result.
+\begin{enumerate}[leftmargin=1.6em,itemsep=2pt,topsep=2pt]
+  \item \textbf{Scaling the action space.} The move-level reduction is the current bridge between combinatorial actions and small-action estimators. Whether a learned latent action space can preserve the identification argument is open and central.
+  \item \textbf{Off-path reliability.} Quantifying how far Stage 4 can travel from the human equilibrium before the recovered reward stops being meaningful, and whether the KL anchor is the right control.
+  \item \textbf{Normalization-robust improvement.} Whether Stage 4 can be formulated to optimize only normalization-invariant functionals, or whether payoff-level anchors are strictly required for joint improvement claims (Section \ref{sec:norm}).
+  \item \textbf{Sufficiency of logged state in safety-critical operations.} Whether $\phi$ built from logs satisfies Assumption \ref{ass:state} when much human awareness is unrecorded, and how far training-simulator data closes that gap.
+  \item \textbf{Sim-to-real gap.} If $\hat F$ and Stage 4 rollouts come from a simulator, how the recovered and improved policies transfer to live operation.
+  \item \textbf{Validating recovered rewards.} Out-of-team transfer tests: do payoffs recovered on one set of teams predict coordination in held-out teams, and is the pooled component $\theta_0$ the part that transfers?
+  \item \textbf{Computational cost} of forward simulation in very large state spaces, where the BBL value estimates may be expensive or high-variance.
+  \item \textbf{Selecting the pooling level} and validating role heterogeneity, including whether the data support distinct $\delta_i$ at all in a given domain.
+\end{enumerate}
+
+A sensible first milestone is to run Stages 0 through 3 on a small, well-instrumented corpus with role labels and a measurable joint output (operator training-simulator sessions for the operations case, or version-controlled collaborative writing or coding as a cleaner-data testbed), recover an identified set for the partially pooled role payoffs, and show that the Stage 3 collective reproduces held-out human interaction statistics. The statistics should be named in advance rather than selected after the fact. Candidates: role-conditional move frequencies; the move-transition matrix, that is, which role acts after which role and after which move; inter-move timing and time-to-resolution distributions; and state-conditional response profiles for a small set of pre-registered state events. Alongside these, a falsification test of Assumption \ref{ass:state}: train a next-move predictor on $\phi(s)$ and on $\phi(s)$ augmented with dropped history, and treat any significant predictive gain from the augmentation as evidence against state sufficiency. That establishes the structural front end empirically before the reinforcement-learning improvement claim is tested.
+
+\bigskip
+\noindent\emph{A note on the literature.} The foundational works below are well established. The cross-disciplinary connection between structural dynamic-game estimation and multi-agent reinforcement learning has been moving quickly, so the most recent bridging work should be checked against the current literature rather than taken only from this list.
+
+\begin{thebibliography}{99}
+
+\bibitem[Abbeel and Ng(2004)]{abbeelNg2004}
+Abbeel, P., and Ng, A. Y. (2004). Apprenticeship learning via inverse reinforcement learning. \emph{Proceedings of the 21st International Conference on Machine Learning}.
+
+\bibitem[Aguirregabiria and Mira(2007)]{aguirregabiriaMira2007}
+Aguirregabiria, V., and Mira, P. (2007). Sequential estimation of dynamic discrete games. \emph{Econometrica}, 75(1), 1--53.
+
+\bibitem[Aguirregabiria and Suzuki(2014)]{aguirregabiriaSuzuki2014}
+Aguirregabiria, V., and Suzuki, J. (2014). Identification and counterfactuals in dynamic models of market entry and exit. \emph{Quantitative Marketing and Economics}, 12(3), 267--304.
+
+\bibitem[Arcidiacono and Miller(2011)]{arcidiaconoMiller2011}
+Arcidiacono, P., and Miller, R. A. (2011). Conditional choice probability estimation of dynamic discrete choice models with unobserved heterogeneity. \emph{Econometrica}, 79(6), 1823--1867.
+
+\bibitem[Bajari et al.(2007)]{bbl2007}
+Bajari, P., Benkard, C. L., and Levin, J. (2007). Estimating dynamic models of imperfect competition. \emph{Econometrica}, 75(5), 1331--1370.
+
+\bibitem[Cao et al.(2021)]{cao2021}
+Cao, H., Cohen, S. N., and Szpruch, L. (2021). Identifiability in inverse reinforcement learning. \emph{Advances in Neural Information Processing Systems}, 34.
+
+\bibitem[Hadfield-Menell et al.(2016)]{hadfieldMenell2016}
+Hadfield-Menell, D., Russell, S., Abbeel, P., and Dragan, A. (2016). Cooperative inverse reinforcement learning. \emph{Advances in Neural Information Processing Systems}, 29.
+
+\bibitem[Hotz and Miller(1993)]{hotzMiller1993}
+Hotz, V. J., and Miller, R. A. (1993). Conditional choice probabilities and the estimation of dynamic models. \emph{Review of Economic Studies}, 60(3), 497--529.
+
+\bibitem[Kalouptsidi et al.(2021)]{kss2021}
+Kalouptsidi, M., Scott, P. T., and Souza-Rodrigues, E. (2021). Identification of counterfactuals in dynamic discrete choice models. \emph{Quantitative Economics}, 12(2), 351--403.
+
+\bibitem[Kim et al.(2021)]{kim2021}
+Kim, K., Garg, S., Shiragur, K., and Ermon, S. (2021). Reward identification in inverse reinforcement learning. \emph{Proceedings of the 38th International Conference on Machine Learning}.
+
+\bibitem[Kumar et al.(2020)]{kumar2020cql}
+Kumar, A., Zhou, A., Tucker, G., and Levine, S. (2020). Conservative Q-learning for offline reinforcement learning. \emph{Advances in Neural Information Processing Systems}, 33.
+
+\bibitem[Magnac and Thesmar(2002)]{magnacThesmar2002}
+Magnac, T., and Thesmar, D. (2002). Identifying dynamic discrete decision processes. \emph{Econometrica}, 70(2), 801--816.
+
+\bibitem[Marschak and Radner(1972)]{marschakRadner1972}
+Marschak, J., and Radner, R. (1972). \emph{Economic Theory of Teams}. New Haven: Yale University Press.
+
+\bibitem[McKelvey and Palfrey(1995)]{mckelveyPalfrey1995}
+McKelvey, R. D., and Palfrey, T. R. (1995). Quantal response equilibria for normal form games. \emph{Games and Economic Behavior}, 10(1), 6--38.
+
+\bibitem[Mnih et al.(2015)]{mnih2015}
+Mnih, V., Kavukcuoglu, K., Silver, D., et al. (2015). Human-level control through deep reinforcement learning. \emph{Nature}, 518, 529--533.
+
+\bibitem[Ng et al.(1999)]{ngHaradaRussell1999}
+Ng, A. Y., Harada, D., and Russell, S. (1999). Policy invariance under reward transformations: theory and application to reward shaping. \emph{Proceedings of the 16th International Conference on Machine Learning}.
+
+\bibitem[Ng and Russell(2000)]{ngRussell2000}
+Ng, A. Y., and Russell, S. (2000). Algorithms for inverse reinforcement learning. \emph{Proceedings of the 17th International Conference on Machine Learning}.
+
+\bibitem[Norets and Tang(2014)]{noretsTang2014}
+Norets, A., and Tang, X. (2014). Semiparametric inference in dynamic binary choice models. \emph{Review of Economic Studies}, 81(3), 1229--1262.
+
+\bibitem[Pakes and McGuire(1994)]{pakesMcGuire1994}
+Pakes, A., and McGuire, P. (1994). Computing Markov-perfect Nash equilibria: numerical implications of a dynamic differentiated product model. \emph{RAND Journal of Economics}, 25(4), 555--589.
+
+\bibitem[Pakes and McGuire(2001)]{pakesMcGuire2001}
+Pakes, A., and McGuire, P. (2001). Stochastic algorithms, symmetric Markov perfect equilibrium, and the curse of dimensionality. \emph{Econometrica}, 69(5), 1261--1281.
+
+\bibitem[Pakes et al.(2007)]{pakesOstrovskyBerry2007}
+Pakes, A., Ostrovsky, M., and Berry, S. (2007). Simple estimators for the parameters of discrete dynamic games, with entry and exit examples. \emph{RAND Journal of Economics}, 38(2), 373--399.
+
+\bibitem[Pesendorfer and Schmidt-Dengler(2008)]{pesendorferSchmidtDengler2008}
+Pesendorfer, M., and Schmidt-Dengler, P. (2008). Asymptotic least squares estimators for dynamic games. \emph{Review of Economic Studies}, 75(3), 901--928.
+
+\bibitem[Ross et al.(2011)]{rossGordonBagnell2011}
+Ross, S., Gordon, G., and Bagnell, D. (2011). A reduction of imitation learning and structured prediction to no-regret online learning. \emph{Proceedings of the 14th International Conference on Artificial Intelligence and Statistics}.
+
+\bibitem[Rust(1987)]{rust1987}
+Rust, J. (1987). Optimal replacement of GMC bus engines: an empirical model of Harold Zurcher. \emph{Econometrica}, 55(5), 999--1033.
+
+\bibitem[Silver et al.(2016)]{silver2016}
+Silver, D., Huang, A., Maddison, C. J., et al. (2016). Mastering the game of Go with deep neural networks and tree search. \emph{Nature}, 529, 484--489.
+
+\bibitem[Skalse et al.(2023)]{skalse2023}
+Skalse, J., Farrugia-Roberts, M., Russell, S., Abate, A., and Gleave, A. (2023). Invariance in policy optimisation and partial identifiability in reward learning. \emph{Proceedings of the 40th International Conference on Machine Learning}.
+
+\bibitem[Yu et al.(2019)]{yuSongErmon2019}
+Yu, L., Song, J., and Ermon, S. (2019). Multi-agent adversarial inverse reinforcement learning. \emph{Proceedings of the 36th International Conference on Machine Learning}.
+
+\bibitem[Ziebart et al.(2008)]{ziebart2008}
+Ziebart, B. D., Maas, A. L., Bagnell, J. A., and Dey, A. K. (2008). Maximum entropy inverse reinforcement learning. \emph{Proceedings of the 23rd AAAI Conference on Artificial Intelligence}.
+
+\end{thebibliography}
+
+\end{document}

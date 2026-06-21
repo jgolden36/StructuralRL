@@ -1,0 +1,231 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{mathtools}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage[authoryear,round]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\theoremstyle{definition}
+\newtheorem{assumption}{Assumption}
+
+\title{From the Control Room to the Discovery Loop:\\
+Structural Initialization of Coordinated Agents\\ for Autonomous Laboratories}
+\author{Dana Golden\\[2pt] \small Argonne National Laboratory}
+\date{Companion working note, \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent A companion note develops the structural-initialization proposal of \citet{golden2026struct} for a second domain: autonomous laboratories and automatic science. The parent proposal recovers the latent primitives of multi-actor human coordination, the per-actor payoffs and beliefs, with a structural dynamic-game estimator, then uses the recovered equilibrium to initialize a collective of AI agents before any reinforcement learning. Here we argue that a scientific discovery campaign is a collaborative-production game with an unusually clean turn-taking structure, the design-make-test-analyze loop, and we map the primitives onto the functional roles of that loop. We are explicit about where the discovery setting is more favorable than power-system operations and where it is harder. It is more favorable in one respect that matters for identification: reagent cost, compute cost, wall-clock, and the realized information gain of the surrogate model are measured and externally denominated, so parts of the payoff carry levels rather than free normalizations. It is harder in three respects: the human equilibrium is competent and coordinated but is explicitly the thing we hope to beat on throughput, so it is a baseline and structural prior rather than a presumptive optimum; many contemporary platforms already automate some roles, which cleans the logs but changes what the estimator recovers; and the transition law contains nature's stochastic response to an experiment, which a surrogate or digital twin can stand in for only up to a sim-to-real gap. We close with the second deliverable: a concrete, pre-registered first test of whether the approach has merit given interaction data from a discovery setting. The test runs the front of the pipeline only, recovers an identified set for partially pooled role payoffs, and checks whether the recovered collective reproduces named, held-out interaction statistics before any improvement claim is made.
+\end{abstract}
+
+\section{The parent method in brief}
+
+The parent note replaces the front of the standard multi-agent training pipeline \citep{golden2026struct}. Behavioral cloning reproduces a policy but recovers no objective, so it cannot be improved and it drifts off the human distribution \citep{rossGordonBagnell2011}. Reinforcement learning can improve, but only once someone supplies a reward that actually induces coordination, which for sparse-signal multi-actor tasks is the hard part. The parent proposal recovers, from data on several humans interacting to produce a joint artifact, each actor's flow payoff and beliefs, using the equilibrium restriction familiar from empirical industrial organization. Observed behavior is treated as equilibrium play, so the requirement that no actor has a profitable deviation pins down the payoffs that rationalize it.
+
+The machinery is the two-step estimator of \citet{bbl2007}, hereafter BBL, built on the inversion of \citet{hotzMiller1993} and read through the dynamic-discrete-choice-to-inverse-reinforcement-learning correspondence \citep{ziebart2008}. The first step estimates policies (conditional choice probabilities) and the transition law. The second step finds payoffs that make the observed policies optimal against the observed rival behavior, using forward simulation rather than equilibrium computation, so it conditions on whatever equilibrium generated the data and never solves the game. Observed play is taken to be a smoothed, quantal-response equilibrium \citep{mckelveyPalfrey1995}, which both fits noisy human teams and aligns with a temperature-parameterized stochastic policy.
+
+Three maintained assumptions carry the argument and are stated in the parent note: state sufficiency, that an encoded state is a sufficient statistic for continuation play; equilibrium play, that observed behavior is a quantal-response equilibrium; and hierarchical pooling, that role payoffs share a common component with shrunken role-specific deviations, $\theta_i = \theta_0 + \delta_i$. One identification warning carries throughout. On-path data identify payoffs only up to the shaping-equivalence class of potential-based reward transformations \citep{ngHaradaRussell1999, magnacThesmar2002, kss2021}. The equilibrium-consistent initialization is invariant to the choice of representative from that class. Joint improvement of all roles is not, and must be disciplined by sensitivity across normalizations, normalization-invariant evaluation, or measured payoff anchors. This last point will turn out to be a strength of the present domain.
+
+\section{The discovery loop as a collaborative-production game}
+
+Automatic science has matured from the early Robot Scientist of \citet{king2009} to self-driving laboratories that close the loop between machine-planned experiments and robotic execution \citep{abolhasaniKumacheva2023, tom2024}. Representative platforms plan, execute, and interpret without a human in the inner loop: the mobile robotic chemist of \citet{burger2020}, the A-Lab for solid-state synthesis of \citet{szymanski2023}, and the language-model-driven Coscientist of \citet{boiko2023}. The methodological point for us is structural rather than instrumental. A discovery campaign is a multi-actor coordination problem whose actors occupy distinct functional roles, and the design-make-test-analyze loop gives that problem a clean turn-taking form that the estimator can exploit.
+
+\subsection{Mapping to the primitives}
+
+We use a stylized set of functional roles rather than a literal platform taxonomy. The roles below are not invented for this note. Contemporary multi-agent discovery systems already decompose the work into close cognates, for example a literature reader, an experiment designer, a computation performer, and a robot operator coordinated by a task manager \citep{song2025}.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt,topsep=2pt]
+  \item \emph{Players}: a proposer (hypothesis and candidate generation), a designer (experiment selection and acquisition, often a Bayesian-optimization or active-learning policy in the sense of \citealp{shahriari2016}), an executor (robotic synthesis and measurement), an analyst (characterization and interpretation of raw measurements into knowledge), and an arbiter (triage, resource allocation, and the decision to escalate to a human).
+  \item \emph{State} $s_t$: the campaign-in-progress, encoded by $\phi$. It includes the live set of candidate hypotheses, the experiment queue, accumulated measurements, a summary of the current surrogate posterior, the remaining reagent and compute budget, equipment status, and the campaign phase. The state is high-dimensional and partly latent, which is the central validity concern, since much scientific judgment is tacit and never logged.
+  \item \emph{Actions} (moves): propose a hypothesis or candidate, design or queue an experiment, execute a synthesis or measurement, characterize and interpret a result, accept a finding, reject or falsify it, replicate or confirm, pivot the campaign, defer, escalate to a human, or stop. The realized content of a move (a specific protocol, a specific compound) is a within-move structured choice on top of the discrete move type, exactly the reduction the parent note performs for text.
+  \item \emph{Payoffs}, partially pooled per $\theta_i = \theta_0 + \delta_i$: the common component $\theta_0$ is the shared discovery objective, validated knowledge per unit of cost, which is what we most want to replicate. The role deviations $\delta_i$ are the specializations: novelty and coverage for the proposer, expected information gain and acquisition efficiency for the designer, throughput and reliability for the executor, rigor and false-positive aversion for the analyst, and portfolio balance and budget discipline for the arbiter.
+  \item \emph{Beliefs}: each role's beliefs about the others, taken in equilibrium to be the estimated conditional choice probabilities $\hat\sigma_{-i}$.
+  \item \emph{Transition} $F(s'\mid s,a)$: how the knowledge state evolves under the joint action. It is partly deterministic, since queuing or accepting moves the campaign mechanically, and partly stochastic, since nature's response to an experiment, whether a synthesis succeeds and what property is measured, is uncertain and partly unknown.
+\end{itemize}
+
+\subsection{A measured-payoff anchor}
+
+The discovery domain offers something the operations domain offered only in part: several payoff components are measured and externally denominated. Write the role payoff as an anchored part plus a free part,
+\begin{equation}
+\pi_i(s,a_i,a_{-i};\theta_i)
+\;=\;
+c(s,a_i,a_{-i})
+\;+\;
+x(s,a_i,a_{-i})^{\top}\theta_i ,
+\label{eq:anchor}
+\end{equation}
+where $c$ collects components whose levels are observed: the negative of realized reagent and instrument cost, the negative of compute cost and wall-clock, and the realized information gain of the surrogate update, that is the reduction in posterior entropy or variance logged by any Bayesian-optimization-driven planner. The term $x^{\top}\theta_i$ carries the unanchored components (effort, coordination or conflict costs, and the harder-to-price parts of novelty and rigor). Because the levels in $c$ are not free, \eqref{eq:anchor} shrinks the shaping-equivalence class of the parent note. This is the strongest of the three normalization disciplines, anchoring, and it is available here by construction of how discovery campaigns are instrumented.
+
+\subsection{Episodic and non-stationary structure}
+
+A campaign is episodic and finite-horizon with an absorbing terminal condition: the target is validated, the budget is exhausted, or the line of inquiry is abandoned. Behavior is also strongly non-stationary within an episode, since competent campaigns explore early and exploit late. The stationary equilibrium of the parent note should therefore be read as defined on episodes, with a terminal payoff at absorption and with campaign phase or budget-remaining entering $\phi$ as a state variable. Making this explicit matters because otherwise the state-sufficiency assumption silently absorbs the non-stationarity, and a violated Markov property would surface only as quiet misestimation.
+
+One assumption is more comfortable here than in operations. Real labs satisfice under resource constraints and do not best-respond exactly, so the quantal-response reading of observed play, bounded and noisy best response, is a natural fit rather than a convenience. The recovered logit scale then denominates the recovered payoffs, and temperature comparisons across labs are statements about relative payoff scale rather than absolute noise.
+
+\section{Where this domain is favorable and where it is harder}
+
+This section is the substantive contribution of the note, since a mechanical relabeling of the operations example would miss what changes.
+
+\paragraph{The good-equilibrium premise is weaker, and that reframes the goal.}
+In power-system operations the human equilibrium is presumptively near-optimal, externally certified by decades of reliability engineering. Competent human science is coordinated and sensible, but it is explicitly the thing autonomous laboratories aim to beat on throughput and cost. The recovered equilibrium is therefore best read as a coordinated baseline and a structural prior over how a discovery team allocates effort, not as a presumptive optimum. This does not weaken the method. It relocates the value. Where operations leaned on the equilibrium-consistent initialization as the prize, discovery leans on the improvement step as the prize, with the recovered equilibrium supplying a coordinated, data-grounded, and interpretable starting point for it.
+
+\paragraph{There is still a catastrophic tail, and it is the false discovery.}
+The avoided cascade gave the operations case a sparse, tail-located good signal that made from-scratch learning unacceptable and shaping hard. Discovery has a direct analog: the avoided false discovery and the avoided irreproducible result. The value of competent scientific coordination is largely the rigor that keeps the false-discovery rate low and prevents wasted campaigns chasing artifacts. This reframes the role of the anchor in the improvement step. Its job is less to keep the collective near a certified human policy and more to preserve the coordination structure and the false-discovery discipline of competent science while efficiency improves. False-discovery discipline is the safety-like property here, and it is measurable, which makes departures from it auditable.
+
+\paragraph{Some roles are already automated, which cleans the logs but changes the estimand.}
+In an existing self-driving lab, the designer is a Bayesian-optimization policy, the executor is a robot, and the analyst is an ML interpreter. Their moves are logged as timestamped, role-labeled, state-conditioned API calls. This is the cleanest possible panel, the discovery analog of richly instrumented operator-training-simulator sessions. It also changes what the second step recovers. From a fully autonomous platform's logs, the estimator recovers the implicit objective and coordination protocol that the platform's designers encoded, not the revealed preferences of competent scientists. That is still useful, since it yields an interpretable and improvable reward for an existing pipeline, but it is a different estimand. Logs from human-in-the-loop campaigns carry revealed preference. The corpus choice in the test below should be made with this distinction in front of us.
+
+\paragraph{The transition law contains nature, and the surrogate is only an approximation.}
+$F(s'\mid s,a)$ includes nature's stochastic response to an experiment, which is genuinely unknown. A validated surrogate, digital twin, or simulator of the experimental system can supply $\hat F$ and let the improvement step roll out in silico without burning reagents, which is the same real advantage the power simulator gave. The catch is sharper here. A surrogate that is wrong off the explored region will mislead exactly the off-path improvement we most want, so the sim-to-real gap is the binding risk for off-path reliability and bounds how far improvement can travel from the human manifold.
+
+\paragraph{Heterogeneity across labs is likely larger.}
+Different labs carry genuinely different cultures and objectives, so the equilibrium-multiplicity and heterogeneity caution of the parent note applies with more force. Naive pooling across labs that played different equilibria is invalid. Either model the heterogeneity with finite mixtures \citep{arcidiaconoMiller2011} or estimate within homogeneous strata. The transfer test below is partly a test of whether a common discovery objective $\theta_0$ exists across labs at all.
+
+\section{The pipeline, specialized}
+
+The pipeline is unchanged in form, so we state only the domain-specific instantiation of each stage and refer to the parent note for the estimating equations.
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt,topsep=2pt]
+  \item \emph{Stage 0, data and representation.} Fix the discovery-loop move taxonomy, propose, design, execute, characterize, accept, reject, replicate, pivot, defer, escalate, stop, and validate it on held-out moves. Fit the state encoder $\phi$ on the campaign state, with phase or budget-remaining included.
+  \item \emph{Stage 1, first step.} Estimate role-conditional conditional choice probabilities $\hat\sigma_i$ and the transition model $\hat F$. Where a surrogate or digital twin is available it supplies $\hat F$ and the rollout environment.
+  \item \emph{Stage 2, second step.} Recover the partially pooled payoffs by the penalized pseudo-likelihood of the parent note, with the anchored decomposition \eqref{eq:anchor} fixing the levels in $c$. The shared discovery objective $\theta_0$ is pooled, the role specializations $\delta_i$ are shrunk, and the pooling level is selected out of sample across held-out campaigns. Report identified sets where weakly identified.
+  \item \emph{Stage 3, equilibrium-consistent initialization.} Warm-start each role at its recovered policy and reward. The collective then sits at an estimate of the human discovery equilibrium, which serves as the orchestration baseline and the auditable default.
+  \item \emph{Stage 4, improvement.} Improve in silico against $\hat F$ under a penalty to the Stage 3 policies. Here the penalty preserves coordination and false-discovery discipline, and the normalization analysis applies exactly: improvement of one role against frozen rivals is invariant across the recovered equivalence class, joint movement of all roles is not, and the anchor in \eqref{eq:anchor} is the discipline that protects joint-improvement claims.
+\end{itemize}
+
+The connection to conservative offline reinforcement learning is the same as in the parent note: the penalty to the recovered policies is the structural cousin of pessimism \citep{kumar2020cql}, keeping the improved policy where the data and the surrogate can vouch for it. The supervised-then-self-play lineage of \citet{silver2016} also carries over, with the supervised step replaced by structural multi-agent estimation.
+
+\section{First steps to test whether the approach has merit}
+
+This section is the second deliverable. It specifies a proof of concept that runs Stages 0 through 3 only, with no improvement claim, and asks one question: does the recovered collective reproduce held-out human interaction in a discovery setting. The design is deliberately concrete, and the statistics are named in advance so that success cannot be selected after the fact.
+
+\subsection{Choice of corpus}
+
+Three tiers are available, cleanest first.
+
+\begin{enumerate}[leftmargin=1.7em,itemsep=2pt,topsep=2pt]
+  \item \textbf{Autonomous-platform decision logs.} The decision logs of an existing self-driving lab with explicit role modules are the discovery analog of the operator training simulator: richly instrumented, role-labeled, state-conditioned, and externally validated by whether the target was found and at what cost \citep{burger2020, szymanski2023, song2025}. This is the cleanest panel and the recommended starting point, with the caveat above that the recovered objective is the platform's encoded objective rather than a scientist's revealed preference.
+  \item \textbf{Human-led campaign records.} Electronic lab notebook, laboratory information management system, and instrument logs from a well-instrumented human-led high-throughput campaign carry revealed preference, at the cost of messier role labels and more unlogged judgment.
+  \item \textbf{Version-controlled computational discovery.} A version-controlled computational-materials or in-silico-discovery repository, with commits, runs, and reviews, is a clean-data warmup testbed, the discovery analog of the version-controlled writing or coding testbed proposed in the parent note. It lets the front end be debugged before the wet-lab estimand is taken on.
+\end{enumerate}
+
+A first result should be obtained on tier one or tier three, where logging is richest, and only then extended to tier two.
+
+\subsection{Stage 0 to Stage 2 on the chosen corpus}
+
+Fix the move taxonomy and validate it by its ability to predict held-out moves, checking sensitivity to the granularity of the move set. Fit $\phi$ and estimate $\hat\sigma_i$ and $\hat F$. Recover the partially pooled role payoffs with the anchored decomposition \eqref{eq:anchor}, select the pooling level across held-out campaigns, and report an identified set for $(\theta_0, \{\delta_i\})$ rather than a spurious point. The dollar-, time-, and bit-denominated components in $c$ should be reported as anchored, and the spread of the free components across admissible normalizations should be reported alongside.
+
+\subsection{The merit test: pre-registered held-out interaction statistics}
+
+The Stage 3 collective is scored on whether it reproduces, on held-out campaigns, the following statistics, all named here in advance.
+
+\begin{enumerate}[leftmargin=1.7em,itemsep=2pt,topsep=2pt]
+  \item \textbf{Role-conditional move frequencies.} How often each role proposes, designs, executes, characterizes, replicates, or defers.
+  \item \textbf{The move-transition matrix.} Which role acts after which, and after which move, that is the realized design-make-test-analyze cycle. Does the proposer-to-designer-to-executor-to-analyst-to-arbiter cadence recur at human rates.
+  \item \textbf{Inter-move timing and outcome timing.} Inter-move intervals, time-to-result, and the experiments-to-discovery distribution.
+  \item \textbf{State-conditional response profiles for pre-registered events.} For a small fixed set of state events, does the recovered collective respond at the human rate. Candidate events: an anomalous or surprising measurement, a failed synthesis, a replication failure, a contradictory result, and a crossing of a budget threshold. The diagnostic actions are replicate, escalate, pivot, and stop.
+  \item \textbf{Campaign-level outcomes.} Experiments-to-validated-discovery, reagent and compute cost per validated result, and the false-discovery or irreproducibility rate. The last is the tail quantity that the coordination is most valuable for controlling, so it is the most important single statistic.
+\end{enumerate}
+
+\subsection{Falsification of state sufficiency}
+
+The sharpest threat in this domain is that the logged state is not a sufficient statistic, because much scientific judgment is tacit. The falsification test trains a next-move predictor on $\phi(s)$ and on $\phi(s)$ augmented with dropped context, for example the free-text rationale or stated hypothesis in the notebook and prior-campaign memory. A significant predictive gain from the augmentation is evidence against state sufficiency. This is the discovery analog of testing whether unlogged operator situational awareness matters, and the concern is at least as severe.
+
+\subsection{Transfer test of the pooled objective}
+
+Recover payoffs on one set of campaigns or labs and ask whether they predict coordination on held-out campaigns or labs, and whether the pooled component $\theta_0$ is the part that transfers. This separates a real shared discovery objective from an artifact of one platform's engineering, and it is the empirical content of the claim that there is a common objective to recover at all.
+
+\subsection{A pre-registered go or no-go rule}
+
+State the decision in advance. The approach has merit, and the improvement step is worth running in silico against $\hat F$, if all three of the following hold: the Stage 3 collective matches the pre-registered interaction statistics within stated tolerances, the state-sufficiency falsification test does not reject, and the pooled objective $\theta_0$ transfers to held-out campaigns. If the statistics match but sufficiency rejects hard, the binding constraint is instrumentation rather than modeling, and the priority becomes richer logging, especially of rationale and hypothesis state, before any improvement claim. If $\theta_0$ does not transfer, the honest conclusion is that there is no common discovery objective across the sampled labs, and estimation should retreat to homogeneous strata. Naming these outcomes in advance is what keeps the test a test.
+
+\section{What this would buy, and the domain-specific risks}
+
+Against behavioral cloning of an autonomous-lab log, the structural step adds a recovered, interpretable objective, which makes improvement well-posed and yields role primitives that can transfer across campaigns rather than a black-box policy that only reproduces and degrades. Against reward shaping and from-scratch multi-agent learning, it removes the two hardest inputs at once: the discovery reward is identified from revealed behavior under an equilibrium restriction instead of shaped by hand, and coordination is present at initialization instead of having to be discovered through expensive real experiments. Against generic multi-agent inverse reinforcement learning, it brings estimators that condition on the data-generating equilibrium and never solve the game, an honest partial-identification stance, and the partial-pooling treatment of role heterogeneity.
+
+The honest risks are specific to the domain and were drawn out above. The good-equilibrium premise is weaker than in operations, so the recovered equilibrium is a baseline and prior rather than an optimum. A fully autonomous corpus recovers a platform's encoded objective rather than a scientist's preference, so the corpus must be chosen with the estimand in mind. The surrogate that supplies $\hat F$ is reliable only near the explored region, so the sim-to-real gap bounds off-path improvement. And tacit, unlogged scientific judgment threatens state sufficiency, which is why the falsification test gates the whole program. The list of open problems in the parent note carries over, with off-path reliability, sufficiency of logged state, and the sim-to-real gap moving up the priority order for this domain.
+
+\bigskip
+\noindent\emph{A note on the literature.} The structural-econometric and reinforcement-learning foundations are cited from the parent note and are well established. The autonomous-laboratory literature is moving quickly, so the platform references below are indicative rather than exhaustive, and the most recent self-driving-lab and multi-agent-discovery work should be checked against the current literature rather than taken only from this list \citep{maffettone2023, seifrid2022, bran2024}.
+
+\begin{thebibliography}{99}
+
+\bibitem[Abolhasani and Kumacheva(2023)]{abolhasaniKumacheva2023}
+Abolhasani, M., and Kumacheva, E. (2023). The rise of self-driving labs in chemical and materials sciences. \emph{Nature Synthesis}, 2(6), 483--492.
+
+\bibitem[Arcidiacono and Miller(2011)]{arcidiaconoMiller2011}
+Arcidiacono, P., and Miller, R. A. (2011). Conditional choice probability estimation of dynamic discrete choice models with unobserved heterogeneity. \emph{Econometrica}, 79(6), 1823--1867.
+
+\bibitem[Bajari et al.(2007)]{bbl2007}
+Bajari, P., Benkard, C. L., and Levin, J. (2007). Estimating dynamic models of imperfect competition. \emph{Econometrica}, 75(5), 1331--1370.
+
+\bibitem[Boiko et al.(2023)]{boiko2023}
+Boiko, D. A., MacKnight, R., Kline, B., and Gomes, G. (2023). Autonomous chemical research with large language models. \emph{Nature}, 624(7992), 570--578.
+
+\bibitem[M. Bran et al.(2024)]{bran2024}
+M. Bran, A., Cox, S., Schilter, O., Baldassari, C., White, A. D., and Schwaller, P. (2024). Augmenting large language models with chemistry tools. \emph{Nature Machine Intelligence}, 6, 525--535.
+
+\bibitem[Burger et al.(2020)]{burger2020}
+Burger, B., Maffettone, P. M., Gusev, V. V., et al. (2020). A mobile robotic chemist. \emph{Nature}, 583, 237--241.
+
+\bibitem[Golden(2026)]{golden2026struct}
+Golden, D. (2026). Structural estimation of dynamic games as a pre-reinforcement-learning initialization for coordinated agentic AI. Working draft, Argonne National Laboratory.
+
+\bibitem[Hotz and Miller(1993)]{hotzMiller1993}
+Hotz, V. J., and Miller, R. A. (1993). Conditional choice probabilities and the estimation of dynamic models. \emph{Review of Economic Studies}, 60(3), 497--529.
+
+\bibitem[Kalouptsidi et al.(2021)]{kss2021}
+Kalouptsidi, M., Scott, P. T., and Souza-Rodrigues, E. (2021). Identification of counterfactuals in dynamic discrete choice models. \emph{Quantitative Economics}, 12(2), 351--403.
+
+\bibitem[King et al.(2009)]{king2009}
+King, R. D., Rowland, J., Oliver, S. G., et al. (2009). The automation of science. \emph{Science}, 324(5923), 85--89.
+
+\bibitem[Kumar et al.(2020)]{kumar2020cql}
+Kumar, A., Zhou, A., Tucker, G., and Levine, S. (2020). Conservative Q-learning for offline reinforcement learning. \emph{Advances in Neural Information Processing Systems}, 33.
+
+\bibitem[Maffettone et al.(2023)]{maffettone2023}
+Maffettone, P. M., Friederich, P., Baird, S. G., et al. (2023). What is missing in autonomous discovery: open challenges for the community. \emph{Digital Discovery}, 2(6), 1644--1659.
+
+\bibitem[Magnac and Thesmar(2002)]{magnacThesmar2002}
+Magnac, T., and Thesmar, D. (2002). Identifying dynamic discrete decision processes. \emph{Econometrica}, 70(2), 801--816.
+
+\bibitem[McKelvey and Palfrey(1995)]{mckelveyPalfrey1995}
+McKelvey, R. D., and Palfrey, T. R. (1995). Quantal response equilibria for normal form games. \emph{Games and Economic Behavior}, 10(1), 6--38.
+
+\bibitem[Ng et al.(1999)]{ngHaradaRussell1999}
+Ng, A. Y., Harada, D., and Russell, S. (1999). Policy invariance under reward transformations: theory and application to reward shaping. \emph{Proceedings of the 16th International Conference on Machine Learning}.
+
+\bibitem[Ross et al.(2011)]{rossGordonBagnell2011}
+Ross, S., Gordon, G., and Bagnell, D. (2011). A reduction of imitation learning and structured prediction to no-regret online learning. \emph{Proceedings of the 14th International Conference on Artificial Intelligence and Statistics}.
+
+\bibitem[Seifrid et al.(2022)]{seifrid2022}
+Seifrid, M., Pollice, R., Aguilar-Granda, A., et al. (2022). Autonomous chemical experiments: challenges and perspectives on establishing a self-driving lab. \emph{Accounts of Chemical Research}, 55(17), 2454--2466.
+
+\bibitem[Shahriari et al.(2016)]{shahriari2016}
+Shahriari, B., Swersky, K., Wang, Z., Adams, R. P., and de Freitas, N. (2016). Taking the human out of the loop: a review of Bayesian optimization. \emph{Proceedings of the IEEE}, 104(1), 148--175.
+
+\bibitem[Silver et al.(2016)]{silver2016}
+Silver, D., Huang, A., Maddison, C. J., et al. (2016). Mastering the game of Go with deep neural networks and tree search. \emph{Nature}, 529, 484--489.
+
+\bibitem[Song et al.(2025)]{song2025}
+Song, T., Luo, M., Zhang, X., et al. (2025). A multiagent-driven robotic AI chemist enabling autonomous chemical research on demand. \emph{Journal of the American Chemical Society}, 147, 12534--12545.
+
+\bibitem[Szymanski et al.(2023)]{szymanski2023}
+Szymanski, N. J., Rendy, B., Fei, Y., et al. (2023). An autonomous laboratory for the accelerated synthesis of novel materials. \emph{Nature}, 624(7990), 86--91.
+
+\bibitem[Tom et al.(2024)]{tom2024}
+Tom, G., Schmid, S. P., Baird, S. G., et al. (2024). Self-driving laboratories for chemistry and materials science. \emph{Chemical Reviews}, 124(16), 9633--9732.
+
+\bibitem[Ziebart et al.(2008)]{ziebart2008}
+Ziebart, B. D., Maas, A. L., Bagnell, J. A., and Dey, A. K. (2008). Maximum entropy inverse reinforcement learning. \emph{Proceedings of the 23rd AAAI Conference on Artificial Intelligence}.
+
+\end{thebibliography}
+
+\end{document}
